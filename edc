@@ -1,0 +1,110 @@
+#!/data/data/com.termux/files/usr/bin/python3
+import datetime, fernet, getpass, hashlib, os, sys
+class EDC():
+    def __init__(self, keystr: str, file: str) -> None:
+        key              = fernet.base64.urlsafe_b64encode(hashlib.sha256(keystr.encode()).digest())
+        self.fernet      = fernet.Fernet(key)
+        self.hash        = hashlib.sha256(hashlib.sha256(keystr.encode()).hexdigest().encode()).hexdigest()
+        self.file        = file
+        self.encryptData = lambda data: self.fernet.encrypt(data)
+        self.decryptData = lambda data: self.fernet.decrypt(data)
+
+    def encrypt(self) -> None:
+        with open(self.file, 'r') as file:
+            lines = file.readlines()
+            if len(lines) != 0:
+                if lines[0][0] == ':':
+                    raise Exception("EncryptError: {} is already encrypted ".format(self.file))
+
+        with open(self.file, 'rb') as file:
+            data = file.read()
+        data = self.encryptData(data)
+        with open(self.file, 'wb') as file:
+            file.write(data)
+
+        with open(self.file, 'r') as file:
+            lines = file.readlines()
+        lines     = [':' + self.hash + '\n'] + lines
+        with open(self.file, 'w') as file:
+            file.writelines(lines)
+            
+    def decrypt(self) -> None:
+        with open(self.file, 'r') as file:
+            lines = file.readlines()
+        if lines[0] != ':' + self.hash + '\n':
+            print(lines[0])
+            raise Exception("KeyError: Invalid key")
+
+        dt = str(datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S"))
+        with open(self.file, 'rb') as outfile:
+            with open('/data/data/com.termux/files/home/.config/edm/cache/'+dt, 'wb') as infile:
+                infile.write(outfile.read())
+        lines = lines[1:]
+        with open(self.file, 'w') as file:
+            file.writelines(lines)
+
+        with open(self.file, 'rb') as file:
+            data = file.read()
+        try: 
+            data = self.decryptData(data)
+        except fernet.InvalidToken:
+            with open(self.file, 'r') as file:
+                lines = file.readlines()
+            lines = [':' + self.hash + '\n' ] + lines
+            with open(self.file, 'w') as file:
+                file.writelines(lines)
+            raise KeyboardInterrupt
+        with open(self.file, 'wb') as file:
+            file.write(data)
+
+    def editor(self, estr = "vi {} {}") -> None:
+        self.decrypt()
+        os.system(estr.format('-n', self.file))
+        self.encrypt()
+
+    def new(self) -> None:
+        open(self.file, 'a')
+        self.encrypt()
+
+def main(args):
+    file = args[0]
+    try:
+        open(file)
+    except FileNotFoundError:
+        if 'y' == input("Do you want to create file: {} (y/n)".format(file)).lower():
+            key1 = getpass.getpass("Key         : ")
+            key2 = getpass.getpass("Re Enter Key: ")
+            if key1 == key2:
+                edc = EDC(key1, file)
+                edc.new()
+                edc.editor()
+        sys.exit()
+
+    if '-a' in args:
+        try:
+            action = args[args.index('-a') +1]
+            if action == 'e':
+                key1 = getpass.getpass("Key         : ")
+                key2 = getpass.getpass("Re Enter Key: ")
+                if key1 == key2:
+                    edc = EDC(key1, file)
+                    edc.encrypt()
+
+            elif action == 'd':
+                key = getpass.getpass("Key: ")
+                edc = EDC(key, file)
+                edc.decrypt()
+
+            elif action.lower() == 'o':
+                key = getpass.getpass("Key: ")
+                edc = EDC(key, file)
+                edc.editor()
+
+        except IndexError:
+            raise Exception("InvalidOptionError")
+
+if __name__ == '__main__':
+    try:
+        main(sys.argv[1:])
+    except IndexError:
+        raise Exception("FileNotMentionedError")
